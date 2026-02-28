@@ -1,0 +1,128 @@
+name: mediaarchive
+
+networks:
+  medianet:
+    driver: bridge
+
+volumes:
+  pgdata:
+    name: mediaarchive_pgdata
+  tsdata:
+    name: mediaarchive_tsdata
+  redis_data:
+    name: mediaarchive_redis_data
+
+services:
+
+  # ─── 1. PostgreSQL 18 + pgvector ─────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: mediaarchive_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - medianet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ─── 2. Typesense 30.1 ────────────────────────────────────────────
+  typesense:
+    image: typesense/typesense:30.1
+    container_name: mediaarchive_typesense
+    restart: unless-stopped
+    command: >
+      --data-dir /data
+      --api-key ${TYPESENSE_API_KEY}
+      --enable-cors
+    volumes:
+      - tsdata:/data
+    ports:
+      - "8108:8108"
+    networks:
+      - medianet
+
+  # ─── 3. Redis 8.0 ─────────────────────────────────────────────────
+  redis:
+    image: redis:8.0-alpine
+    container_name: mediaarchive_redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD} --save 60 1
+    volumes:
+      - redis_data:/data
+    networks:
+      - medianet
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ─── 4. App (Next.js 15 + Hono) ──────────────────────────────────
+  app:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      target: runner
+      args:
+        NEXT_PUBLIC_TYPESENSE_HOST: ${NEXT_PUBLIC_TYPESENSE_HOST}
+        NEXT_PUBLIC_TYPESENSE_PORT: ${NEXT_PUBLIC_TYPESENSE_PORT}
+        NEXT_PUBLIC_TYPESENSE_SEARCH_ONLY_KEY: ${TYPESENSE_SEARCH_ONLY_KEY}
+    container_name: mediaarchive_app
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      TYPESENSE_HOST: typesense
+      TYPESENSE_PORT: "8108"
+      TYPESENSE_API_KEY: ${TYPESENSE_API_KEY}
+      TYPESENSE_SEARCH_ONLY_KEY: ${TYPESENSE_SEARCH_ONLY_KEY}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      AUTH_SECRET: ${AUTH_SECRET}
+      NEXTAUTH_URL: ${NEXTAUTH_URL}
+      NEXT_PUBLIC_TYPESENSE_HOST: ${NEXT_PUBLIC_TYPESENSE_HOST}
+      NEXT_PUBLIC_TYPESENSE_PORT: ${NEXT_PUBLIC_TYPESENSE_PORT}
+      NEXT_PUBLIC_TYPESENSE_SEARCH_ONLY_KEY: ${TYPESENSE_SEARCH_ONLY_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      typesense:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - medianet
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health 2>/dev/null | grep -q 'ok'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ─── 5. Caddy (reverse proxy) ─────────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    container_name: mediaarchive_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - medianet

@@ -1,0 +1,12 @@
+# Caddy reverse proxy for MediaArchive
+# Development: serves on :80 and proxies to the Next.js app
+# Production: add your domain to enable automatic HTTPS via Let's Encrypt
+
+:80 {
+    reverse_proxy app:3000
+}
+
+# Uncomment and set your domain for production HTTPS:
+# yourdomain.com {
+#     reverse_proxy app:3000
+# }

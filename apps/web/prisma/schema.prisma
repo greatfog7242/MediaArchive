@@ -1,0 +1,112 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Roles ────────────────────────────────────────────────────────
+enum Role {
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+// ─── User ─────────────────────────────────────────────────────────
+model User {
+  id               String        @id @default(cuid())
+  email            String        @unique
+  name             String?
+  image            String?
+  passwordHash     String?
+  role             Role          @default(VIEWER)
+  emailVerified    DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  // Auth.js v5 adapter relations
+  accounts         Account[]
+  sessions         Session[]
+
+  // Audit: records last modified by this user
+  modifiedRecords  MediaRecord[] @relation("LastModifiedBy")
+
+  @@map("users")
+}
+
+// ─── Auth.js v5 adapter models ────────────────────────────────────
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+// Session model retained for Auth.js adapter compatibility.
+// Not written to in practice since we use JWT strategy (stateless cookies).
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ─── MediaRecord ──────────────────────────────────────────────────
+model MediaRecord {
+  id               String    @id @default(cuid())
+
+  // Core schema fields (matches CSV import columns)
+  title            String
+  series           String?
+  date             DateTime?
+  accessCopy       String?
+  kalturaId        String?   @unique
+  embedCode        String?   @db.Text  // full Kaltura <iframe> HTML — DB only, excluded from Typesense
+  viewOnline       String?
+  startTime        Int?                // seconds from clip start
+  stopTime         Int?                // seconds from clip start
+  filmReel         String?
+  reelSegment      String?
+  reporter         String?
+
+  // System fields
+  lastModified     DateTime  @updatedAt
+  createdAt        DateTime  @default(now())
+
+  // Audit trail: which user last mutated this record
+  lastModifiedById String?
+  lastModifiedBy   User?     @relation("LastModifiedBy", fields: [lastModifiedById], references: [id])
+
+  @@index([series])
+  @@index([reporter])
+  @@index([filmReel])
+  @@index([lastModifiedById])
+  @@map("media_records")
+}
