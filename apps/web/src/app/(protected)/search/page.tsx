@@ -6,6 +6,7 @@ import Link from "next/link";
 import { InstantSearch, Pagination } from "react-instantsearch";
 import { SlidersHorizontal, Plus } from "lucide-react";
 import { searchClient } from "@/lib/typesense-adapter";
+import { useSearchRouter } from "@/lib/search-router";
 import { SearchBox } from "@/components/search/SearchBox";
 import { FacetPanel } from "@/components/search/FacetPanel";
 import { ActiveFilters } from "@/components/search/ActiveFilters";
@@ -29,6 +30,9 @@ export default function SearchPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("tile");
   const { canMutate, isLoading } = useRole();
   const searchParams = useSearchParams();
+  
+  // Use the search router to sync InstantSearch state to URL
+  useSearchRouter();
 
   // Build initial UI state from URL parameters
   const initialUiState = {
