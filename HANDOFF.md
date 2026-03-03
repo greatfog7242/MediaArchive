@@ -1,7 +1,7 @@
 # MediaArchive — Session Handoff Document
 
-**Last updated:** 2026-02-28
-**Status:** Phase 6b complete — all features implemented. Database contains 22 test records for demo purposes.
+**Last updated:** 2026-03-02
+**Status:** Phase 6b complete — all features implemented. Database contains 22 test records for demo purposes. Fixed: removed field-level unique constraint on kalturaId, kept composite unique constraint (kalturaId+startTime+stopTime).
 
 ---
 
@@ -47,6 +47,12 @@ curl http://localhost:3000/api/health   # → {"ok":true,"service":"mediaarchive
 ### Typesense Sync Note
 - `fullSyncToTypesense()` only upserts records — it does NOT delete stale records
 - To fully reconcile: delete the collection first, then sync
+
+### Database Schema Fix (2026-03-02)
+- Issue: `kalturaId` field had a unique constraint, preventing multiple records with same KalturaID
+- Fix: Removed field-level unique constraint on `kalturaId`, kept composite unique constraint on `(kalturaId, startTime, stopTime)`
+- Database now allows multiple records with same KalturaID but different start/stop times
+- CSV import uses composite key for deduplication
 ```bash
 curl -X DELETE "http://localhost:8108/collections/media_records?force=true" -H "X-Typesense-Api-Key: dev_typesense_admin_key"
 curl -b cookies.txt -X POST "http://localhost:3000/api/hono/sync"
@@ -173,7 +179,7 @@ CSV import/export with BullMQ queuing for large files, full admin panel with use
 | | Facet filtering (series, reporter, filmReel) | PASS |
 | **CSV Import** | Inline import (3 rows) — 0 errors | PASS |
 | | Queued import (5001 rows) → 202 + jobId | PASS |
-| | Re-import dedup via kalturaId | PASS |
+| | Re-import dedup via kalturaId+startTime+stopTime composite key | PASS |
 | | Validation errors on invalid rows | PASS |
 | **CSV Export** | Row count matches PG (5006 lines) | PASS |
 | **Admin Panel** | Create user + change role + delete user | PASS |
@@ -651,7 +657,7 @@ Then re-run migration and seed.
 | `serverEnv` / `clientEnv` (not `env`) | `env.ts` exports two named objects — any new code importing env must use these names |
 | No `"server-only"` on csv.service.ts | BullMQ worker imports it outside Next.js context |
 | BullMQ creates its own Redis connections | Cannot share the ioredis singleton (BullMQ requirement) |
-| Prisma `upsert` on kalturaId for CSV import | Rows without kalturaId fall back to `create` (no dedup key) |
+| Prisma `upsert` on kalturaId+startTime+stopTime composite key for CSV import | Rows missing any composite key field fall back to `create` (no dedup) |
 | Role cache invalidation on update | `updateUserRole()` calls `redis.del(role:{id})`; `verifyRole()` queries DB on cache miss (not JWT) so changes take effect immediately |
 | Last-admin guard | `deleteUser()` counts admins and prevents deleting the sole remaining one |
 | Shadcn components hand-written | CLI requires interactive prompts; hand-written to match exact output (same approach across all phases) |
@@ -690,7 +696,7 @@ CSV import columns map to these Prisma fields:
 | Series | `series` | ✅ facet | |
 | Date | `date` | ✅ as int64 | |
 | Access Copy | `accessCopy` | ✅ | Staff-only in UI |
-| KalturaID | `kalturaId` | ❌ | Unique, dedup key for CSV import |
+| KalturaID | `kalturaId` | ❌ | Part of composite unique key with startTime+stopTime for CSV import dedup |
 | *(paste embed code manually)* | `embedCode` | ❌ | DB only, DOMPurify on render |
 | View Online | `viewOnline` | ❌ | |
 | Start Time | `startTime` | ❌ | Stored as seconds (Int) |
