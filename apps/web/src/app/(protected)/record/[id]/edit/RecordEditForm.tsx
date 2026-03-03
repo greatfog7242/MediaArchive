@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Save } from "lucide-react";
 import { z } from "zod";
@@ -43,7 +43,10 @@ const updateSchema = z.object({
 });
 
 export function RecordEditForm({ record }: { record: RecordData }) {
+  console.error('DEBUG ERROR: RecordEditForm component mounting with record kalturaId:', record.kalturaId);
+  console.log('DEBUG: RecordEditForm component mounting with full record:', record);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -61,6 +64,84 @@ export function RecordEditForm({ record }: { record: RecordData }) {
   const [viewOnline, setViewOnline] = useState(record.viewOnline ?? "");
   const [startTime, setStartTime] = useState(record.startTime?.toString() ?? "");
   const [stopTime, setStopTime] = useState(record.stopTime?.toString() ?? "");
+
+  // Debug initial state
+  useEffect(() => {
+    console.log('DEBUG: Initial record data:', {
+      kalturaId: record.kalturaId,
+      embedCode: record.embedCode,
+      startTime: record.startTime,
+      stopTime: record.stopTime,
+      title: record.title
+    });
+    console.log('DEBUG: Form initial state:', {
+      kalturaId,
+      embedCode,
+      startTime,
+      stopTime,
+      title
+    });
+  }, []);
+
+  // Function to generate Kaltura embed code
+  function generateKalturaEmbedCode(
+    kalturaId: string,
+    startTime: number = 0,
+    stopTime: number | null = null,
+    title: string = ""
+  ): string {
+    const partnerId = "2370711";
+    const uiconfId = "54949472";
+    const widgetId = "1_a9d2nted";
+
+    // Ensure startTime is a number (handle null/undefined)
+    const safeStartTime = startTime ?? 0;
+
+    let src = `https://cdnapisec.kaltura.com/p/${partnerId}/embedPlaykitJs/uiconf_id/${uiconfId}?iframeembed=true&amp;entry_id=${kalturaId}&amp;kalturaSeekFrom=${safeStartTime}`;
+
+    if (stopTime !== null && stopTime > safeStartTime) {
+      src += `&amp;kalturaClipTo=${stopTime}`;
+    }
+
+    src += `&amp;kalturaStartTime=0&amp;config[provider]={&quot;widgetId&quot;:&quot;${widgetId}&quot;}`;
+
+    return `<iframe id="kaltura_player_${kalturaId}" src="${src}" style="width: 608px;height: 342px;border: 0;" allowfullscreen="" webkitallowfullscreen="" mozallowfullscreen="" allow="autoplay *; fullscreen *; encrypted-media *" sandbox="allow-downloads allow-forms allow-same-origin allow-scripts allow-top-navigation allow-pointer-lock allow-popups allow-modals allow-orientation-lock allow-popups-to-escape-sandbox allow-presentation allow-top-navigation-by-user-activation" title="${title}">
+                    </iframe>`;
+  }
+
+  // Update embed code when kalturaId, startTime, stopTime, or title changes
+  useEffect(() => {
+    console.log('DEBUG: useEffect triggered with:', { kalturaId, startTime, stopTime, title });
+    if (kalturaId.trim()) {
+      console.log('DEBUG: kalturaId is not empty, generating embed code');
+      // Parse start time, default to 0 if empty or invalid
+      const startTimeNum = startTime ? parseInt(startTime, 10) : 0;
+      const safeStartTime = isNaN(startTimeNum) ? 0 : startTimeNum;
+
+      // Parse stop time, default to null if empty or invalid
+      let stopTimeNum = null;
+      if (stopTime) {
+        const parsed = parseInt(stopTime, 10);
+        if (!isNaN(parsed)) {
+          stopTimeNum = parsed;
+        }
+      }
+
+      console.log('DEBUG: Parsed values:', { safeStartTime, stopTimeNum });
+
+      // Always generate embed code - the function handles invalid stop times
+      const generatedEmbedCode = generateKalturaEmbedCode(
+        kalturaId,
+        safeStartTime,
+        stopTimeNum,
+        title
+      );
+      console.log('DEBUG: Generated embed code (first 100 chars):', generatedEmbedCode.substring(0, 100));
+      setEmbedCode(generatedEmbedCode);
+    } else {
+      console.log('DEBUG: kalturaId is empty or whitespace');
+    }
+  }, [kalturaId, startTime, stopTime, title]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -103,7 +184,12 @@ export function RecordEditForm({ record }: { record: RecordData }) {
       });
 
       if (res.ok) {
-        router.push(`/record/${record.id}`);
+        router.push({
+          pathname: `/record/${record.id}`,
+          query: Object.fromEntries(
+            Array.from(searchParams.entries()).filter(([_, value]) => value)
+          )
+        });
       } else {
         const data = await res.json();
         setError(data.error ?? "Failed to save changes");
@@ -120,7 +206,12 @@ export function RecordEditForm({ record }: { record: RecordData }) {
       {/* Action bar */}
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="sm" asChild>
-          <Link href={`/record/${record.id}`}>
+          <Link href={{
+            pathname: `/record/${record.id}`,
+            query: Object.fromEntries(
+              Array.from(searchParams.entries()).filter(([_, value]) => value)
+            )
+          }}>
             <ArrowLeft className="mr-1.5 h-4 w-4" />
             Back
           </Link>
@@ -263,7 +354,42 @@ export function RecordEditForm({ record }: { record: RecordData }) {
 
               {/* Embed Code — full width */}
               <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="embedCode">Embed Code</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="embedCode">Embed Code</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (kalturaId.trim()) {
+                        // Parse start time, default to 0 if empty or invalid
+                        const startTimeNum = startTime ? parseInt(startTime, 10) : 0;
+                        const safeStartTime = isNaN(startTimeNum) ? 0 : startTimeNum;
+
+                        // Parse stop time, default to null if empty or invalid
+                        let stopTimeNum = null;
+                        if (stopTime) {
+                          const parsed = parseInt(stopTime, 10);
+                          if (!isNaN(parsed)) {
+                            stopTimeNum = parsed;
+                          }
+                        }
+
+                        // Always generate embed code - the function handles invalid stop times
+                        const generatedEmbedCode = generateKalturaEmbedCode(
+                          kalturaId,
+                          safeStartTime,
+                          stopTimeNum,
+                          title
+                        );
+                        setEmbedCode(generatedEmbedCode);
+                      }
+                    }}
+                    disabled={!kalturaId.trim()}
+                  >
+                    Generate from Kaltura ID
+                  </Button>
+                </div>
                 <Textarea
                   id="embedCode"
                   value={embedCode}
@@ -271,6 +397,11 @@ export function RecordEditForm({ record }: { record: RecordData }) {
                   rows={3}
                   placeholder="<iframe ...>"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Embed code will be automatically generated when Kaltura ID is entered.
+                  Invalid stop times (≤ start time) will be ignored. You can also edit
+                  it manually or use the button above to regenerate.
+                </p>
               </div>
             </div>
 

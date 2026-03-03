@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Pencil, Trash2 } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Pencil, Trash2, Video } from "lucide-react";
 import { useRole } from "@/hooks/use-role";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,20 +33,30 @@ interface HitTileProps {
     series?: string | null;
     reporter?: string | null;
     filmReel?: string | null;
+    kalturaId?: string | null;
   };
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: string) => void;
 }
 
+function getKalturaThumbnailUrl(kalturaId: string | null | undefined): string | null {
+  if (!kalturaId) return null;
+  return `https://cdnapisec.kaltura.com/p/2370711/thumbnail/entry_id/${kalturaId}/width/240`;
+}
+
 export function HitTile({ hit, selectable, selected, onToggleSelect }: HitTileProps) {
   const { canMutate, isAdmin } = useRole();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [deleting, setDeleting] = useState(false);
+  const [thumbnailError, setThumbnailError] = useState(false);
 
   const formattedDate = hit.date
     ? new Date(hit.date * 1000).toLocaleDateString()
     : null;
+
+  const thumbnailUrl = getKalturaThumbnailUrl(hit.kalturaId);
 
   async function handleDelete() {
     setDeleting(true);
@@ -64,6 +74,23 @@ export function HitTile({ hit, selectable, selected, onToggleSelect }: HitTilePr
 
   return (
     <Card className={`flex flex-col ${selected ? "ring-2 ring-primary" : ""}`}>
+      {/* Thumbnail area */}
+      <div className="relative h-32 w-full overflow-hidden rounded-t-lg bg-muted">
+        {thumbnailUrl && !thumbnailError ? (
+          <img
+            src={thumbnailUrl}
+            alt={`Thumbnail for ${hit.title}`}
+            className="h-full w-full object-cover"
+            onError={() => setThumbnailError(true)}
+            loading="lazy"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center">
+            <Video className="h-12 w-12 text-muted-foreground" />
+          </div>
+        )}
+      </div>
+
       <CardHeader className="pb-3">
         <div className="flex items-start gap-2">
           {selectable && (
@@ -75,10 +102,15 @@ export function HitTile({ hit, selectable, selected, onToggleSelect }: HitTilePr
               aria-label={`Select ${hit.title}`}
             />
           )}
-          <div className="min-w-0 flex-1">
+           <div className="min-w-0 flex-1">
             <CardTitle className="text-base">
               <Link
-                href={`/record/${hit.id}`}
+                href={{
+                  pathname: `/record/${hit.id}`,
+                  query: Object.fromEntries(
+                    Array.from(searchParams.entries()).filter(([_, value]) => value)
+                  )
+                }}
                 className="hover:underline"
               >
                 {hit.title}
@@ -111,9 +143,14 @@ export function HitTile({ hit, selectable, selected, onToggleSelect }: HitTilePr
       </CardContent>
       {(canMutate || isAdmin) && (
         <CardFooter className="gap-2 pt-0">
-          {canMutate && (
+           {canMutate && (
             <Button variant="outline" size="sm" asChild>
-              <Link href={`/record/${hit.id}/edit`}>
+              <Link href={{
+                pathname: `/record/${hit.id}/edit`,
+                query: Object.fromEntries(
+                  Array.from(searchParams.entries()).filter(([_, value]) => value)
+                )
+              }}>
                 <Pencil className="mr-1.5 h-3 w-3" />
                 Edit
               </Link>
