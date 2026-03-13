@@ -120,15 +120,21 @@ export async function importBatch(
       };
 
       let record;
-      if (kalturaId) {
-        // Upsert on kalturaId for dedup
+      if (kalturaId !== null && data.startTime !== null && data.stopTime !== null) {
+        // Upsert on composite unique constraint (kalturaId, startTime, stopTime)
         record = await db.mediaRecord.upsert({
-          where: { kalturaId },
+          where: {
+            kalturaId_startTime_stopTime: {
+              kalturaId,
+              startTime: data.startTime,
+              stopTime: data.stopTime,
+            },
+          },
           update: data,
           create: data,
         });
       } else {
-        // No kalturaId — always create (no dedup key)
+        // Missing one of the composite key fields — always create (no dedup key)
         record = await db.mediaRecord.create({ data });
       }
 

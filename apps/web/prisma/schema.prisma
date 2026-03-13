@@ -87,7 +87,7 @@ model MediaRecord {
   series           String?
   date             DateTime?
   accessCopy       String?
-  kalturaId        String?   @unique
+  kalturaId        String?
   embedCode        String?   @db.Text  // full Kaltura <iframe> HTML — DB only, excluded from Typesense
   viewOnline       String?
   startTime        Int?                // seconds from clip start
@@ -104,6 +104,7 @@ model MediaRecord {
   lastModifiedById String?
   lastModifiedBy   User?     @relation("LastModifiedBy", fields: [lastModifiedById], references: [id])
 
+  @@unique([kalturaId, startTime, stopTime])
   @@index([series])
   @@index([reporter])
   @@index([filmReel])

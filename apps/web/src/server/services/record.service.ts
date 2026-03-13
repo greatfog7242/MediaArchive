@@ -7,6 +7,32 @@ import {
   bulkUpsertToTypesense,
 } from "@/server/typesense.service";
 
+// Helper function to generate Kaltura embed code
+function generateKalturaEmbedCode(
+  kalturaId: string,
+  startTime: number = 0,
+  stopTime: number | null = null,
+  title: string = ""
+): string {
+  const partnerId = "2370711";
+  const uiconfId = "54949472";
+  const widgetId = "1_a9d2nted";
+
+  // Ensure startTime is a number (handle null/undefined)
+  const safeStartTime = startTime ?? 0;
+
+  let src = `https://cdnapisec.kaltura.com/p/${partnerId}/embedPlaykitJs/uiconf_id/${uiconfId}?iframeembed=true&amp;entry_id=${kalturaId}&amp;kalturaSeekFrom=${safeStartTime}`;
+
+  if (stopTime !== null && stopTime > safeStartTime) {
+    src += `&amp;kalturaClipTo=${stopTime}`;
+  }
+
+  src += `&amp;kalturaStartTime=0&amp;config[provider]={&quot;widgetId&quot;:&quot;${widgetId}&quot;}`;
+
+  return `<iframe id="kaltura_player_${kalturaId}" src="${src}" style="width: 608px;height: 342px;border: 0;" allowfullscreen="" webkitallowfullscreen="" mozallowfullscreen="" allow="autoplay *; fullscreen *; encrypted-media *" sandbox="allow-downloads allow-forms allow-same-origin allow-scripts allow-top-navigation allow-pointer-lock allow-popups allow-modals allow-orientation-lock allow-popups-to-escape-sandbox allow-presentation allow-top-navigation-by-user-activation" title="${title}">
+                    </iframe>`;
+}
+
 // ─── Validation Schemas ──────────────────────────────────────────
 
 export const createRecordSchema = z.object({
@@ -81,6 +107,21 @@ export async function getRecordById(id: string) {
 }
 
 export async function createRecord(input: CreateRecordInput, editorId: string) {
+  // Generate embed code if kalturaId is provided and embedCode is not
+  let embedCode = input.embedCode ?? null;
+  if (input.kalturaId && !input.embedCode) {
+    const startTime = input.startTime ?? 0;
+    const stopTime = input.stopTime ?? null;
+
+    // Always generate embed code - the function handles invalid stop times
+    embedCode = generateKalturaEmbedCode(
+      input.kalturaId,
+      startTime,
+      stopTime,
+      input.title
+    );
+  }
+
   // 1. Write to PostgreSQL (source of truth)
   const record = await db.mediaRecord.create({
     data: {
@@ -89,7 +130,7 @@ export async function createRecord(input: CreateRecordInput, editorId: string) {
       date: input.date ? new Date(input.date) : null,
       accessCopy: input.accessCopy ?? null,
       kalturaId: input.kalturaId ?? null,
-      embedCode: input.embedCode ?? null,
+      embedCode: embedCode,
       viewOnline: input.viewOnline ?? null,
       startTime: input.startTime ?? null,
       stopTime: input.stopTime ?? null,
@@ -115,6 +156,36 @@ export async function updateRecord(
   const existing = await db.mediaRecord.findUnique({ where: { id } });
   if (!existing) return null;
 
+  // Determine if we need to generate/regenerate embed code
+  let embedCode = input.embedCode;
+  const shouldGenerateEmbedCode =
+    // If kalturaId is being set/changed and embedCode wasn't explicitly provided
+    (input.kalturaId !== undefined && input.embedCode === undefined) ||
+    // If startTime or stopTime is being changed and we have a kalturaId
+    ((input.startTime !== undefined || input.stopTime !== undefined) &&
+     (input.kalturaId ?? existing.kalturaId) &&
+     input.embedCode === undefined);
+
+  if (shouldGenerateEmbedCode) {
+    const kalturaId = input.kalturaId ?? existing.kalturaId;
+    const startTime = input.startTime ?? existing.startTime ?? 0;
+    const stopTime = input.stopTime ?? existing.stopTime ?? null;
+    const title = input.title ?? existing.title;
+
+    if (kalturaId) {
+      // Always generate embed code - the function handles invalid stop times
+      embedCode = generateKalturaEmbedCode(
+        kalturaId,
+        startTime,
+        stopTime,
+        title
+      );
+    } else {
+      // No kalturaId, clear embed code
+      embedCode = null;
+    }
+  }
+
   // 1. Update in PostgreSQL
   const record = await db.mediaRecord.update({
     where: { id },
@@ -130,8 +201,8 @@ export async function updateRecord(
       ...(input.kalturaId !== undefined && {
         kalturaId: input.kalturaId ?? null,
       }),
-      ...(input.embedCode !== undefined && {
-        embedCode: input.embedCode ?? null,
+      ...(embedCode !== undefined && {
+        embedCode: embedCode ?? null,
       }),
       ...(input.viewOnline !== undefined && {
         viewOnline: input.viewOnline ?? null,

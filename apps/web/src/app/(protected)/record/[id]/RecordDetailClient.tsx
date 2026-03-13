@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
 import { useRole } from "@/hooks/use-role";
@@ -40,7 +40,20 @@ interface RecordData {
 export function RecordDetailClient({ record }: { record: RecordData }) {
   const { canMutate, isAdmin } = useRole();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [deleting, setDeleting] = useState(false);
+
+  // Go back to search, preserving any search parameters
+  const handleBack = () => {
+    // Check if we have search parameters to preserve
+    if (searchParams.toString()) {
+      // Build search URL with preserved parameters
+      router.push(`/search?${searchParams.toString()}`);
+    } else {
+      // No parameters, just go to search
+      router.push("/search");
+    }
+  };
 
   async function handleDelete() {
     setDeleting(true);
@@ -49,7 +62,7 @@ export function RecordDetailClient({ record }: { record: RecordData }) {
         method: "DELETE",
       });
       if (res.ok) {
-        router.push("/search");
+        handleBack();
       }
     } finally {
       setDeleting(false);
@@ -60,16 +73,19 @@ export function RecordDetailClient({ record }: { record: RecordData }) {
     <div className="space-y-6">
       {/* Action bar */}
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" asChild>
-          <Link href="/search">
-            <ArrowLeft className="mr-1.5 h-4 w-4" />
-            Back
-          </Link>
+        <Button variant="ghost" size="sm" onClick={handleBack}>
+          <ArrowLeft className="mr-1.5 h-4 w-4" />
+          Back to Search
         </Button>
         <div className="ml-auto flex items-center gap-2">
           {canMutate && (
             <Button variant="outline" size="sm" asChild>
-              <Link href={`/record/${record.id}/edit`}>
+              <Link href={{
+                pathname: `/record/${record.id}/edit`,
+                query: Object.fromEntries(
+                  Array.from(searchParams.entries()).filter(([_, value]) => value)
+                )
+              }}>
                 <Pencil className="mr-1.5 h-4 w-4" />
                 Edit
               </Link>
@@ -109,16 +125,16 @@ export function RecordDetailClient({ record }: { record: RecordData }) {
         </div>
       </div>
 
-      {/* Two-column layout */}
-      <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
+      {/* Responsive layout */}
+      <div className="grid gap-8 lg:grid-cols-3">
         {/* Left: Player */}
-        <div className="space-y-4">
-          <EmbedPlayer embedCode={record.embedCode} />
+        <div className="space-y-4 lg:col-span-2">
+          <EmbedPlayer embedCode={record.embedCode} kalturaId={record.kalturaId} startTime={record.startTime} stopTime={record.stopTime} title={record.title} />
           <h1 className="text-xl font-semibold">{record.title}</h1>
         </div>
 
         {/* Right: Metadata */}
-        <aside>
+        <aside className="lg:col-span-1">
           <MetadataPanel record={record} />
         </aside>
       </div>
