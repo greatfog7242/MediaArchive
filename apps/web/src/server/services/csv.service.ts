@@ -1,11 +1,10 @@
 import { z } from "zod";
 import { parse } from "csv-parse/sync";
 import { stringify } from "csv-stringify/sync";
+import { deriveMediaMetadata } from "@/lib/kaltura";
 import { db } from "@/server/db";
 import { bulkUpsertToTypesense } from "@/server/typesense.service";
 import { redis } from "@/server/redis";
-
-// ─── CSV Column Mapping ────────────────────────────────────────────
 
 const CSV_HEADERS = [
   "Title",
@@ -20,8 +19,6 @@ const CSV_HEADERS = [
   "Reel Segment",
   "Reporter",
 ] as const;
-
-// ─── Row Validation ────────────────────────────────────────────────
 
 const csvRowSchema = z.object({
   Title: z.string().min(1, "Title is required"),
@@ -52,8 +49,6 @@ export interface ImportProgress {
   errors: Array<{ row: number; message: string }>;
 }
 
-// ─── Service Functions ─────────────────────────────────────────────
-
 export function parseCsvToRows(csvContent: string): Record<string, string>[] {
   return parse(csvContent, {
     columns: true,
@@ -73,7 +68,7 @@ export function validateRows(rows: Record<string, string>[]): ValidationResult {
       valid.push(result.data);
     } else {
       const messages = result.error.issues.map((issue) => issue.message).join("; ");
-      errors.push({ row: i + 2, message: messages }); // +2 for 1-indexed + header row
+      errors.push({ row: i + 2, message: messages });
     }
   }
 
@@ -92,6 +87,29 @@ function parseOptionalDate(value: string): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
+function generateKalturaEmbedCode(
+  kalturaId: string,
+  startTime: number = 0,
+  stopTime: number | null = null,
+  title: string = ""
+): string {
+  const partnerId = "2370711";
+  const uiconfId = "54949472";
+  const widgetId = "1_a9d2nted";
+  const safeStartTime = startTime ?? 0;
+
+  let src = `https://cdnapisec.kaltura.com/p/${partnerId}/embedPlaykitJs/uiconf_id/${uiconfId}?iframeembed=true&amp;entry_id=${kalturaId}&amp;kalturaSeekFrom=${safeStartTime}`;
+
+  if (stopTime !== null && stopTime > safeStartTime) {
+    src += `&amp;kalturaClipTo=${stopTime}`;
+  }
+
+  src += `&amp;kalturaStartTime=0&amp;config[provider]={&quot;widgetId&quot;:&quot;${widgetId}&quot;}`;
+
+  return `<iframe id="kaltura_player_${kalturaId}" src="${src}" style="width: 608px;height: 342px;border: 0;" allowfullscreen="" webkitallowfullscreen="" mozallowfullscreen="" allow="autoplay *; fullscreen *; encrypted-media *" sandbox="allow-downloads allow-forms allow-same-origin allow-scripts allow-top-navigation allow-pointer-lock allow-popups allow-modals allow-orientation-lock allow-popups-to-escape-sandbox allow-presentation allow-top-navigation-by-user-activation" title="${title}">
+                    </iframe>`;
+}
+
 export async function importBatch(
   rows: CsvRow[],
   editorId: string
@@ -102,17 +120,33 @@ export async function importBatch(
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]!;
     try {
-      const kalturaId = row.KalturaID?.trim() || null;
+      const startTime = parseOptionalInt(row["Start Time"]);
+      const stopTime = parseOptionalInt(row["Stop Time"]);
+      const derivedMedia = deriveMediaMetadata({
+        kalturaId: row.KalturaID?.trim() || null,
+        viewOnline: null,
+        embedCode: null,
+      });
+
+      const embedCode = derivedMedia.kalturaId
+        ? generateKalturaEmbedCode(
+            derivedMedia.kalturaId,
+            startTime ?? 0,
+            stopTime,
+            row.Title
+          )
+        : null;
 
       const data = {
         title: row.Title,
         series: row.Series || null,
         date: parseOptionalDate(row.Date),
         accessCopy: row["Access Copy"] || null,
-        kalturaId,
+        kalturaId: derivedMedia.kalturaId,
+        embedCode,
         viewOnline: row["View Online"] || null,
-        startTime: parseOptionalInt(row["Start Time"]),
-        stopTime: parseOptionalInt(row["Stop Time"]),
+        startTime,
+        stopTime,
         filmReel: row["Film Reel"] || null,
         reelSegment: row["Reel Segment"] || null,
         reporter: row.Reporter || null,
@@ -120,12 +154,11 @@ export async function importBatch(
       };
 
       let record;
-      if (kalturaId !== null && data.startTime !== null && data.stopTime !== null) {
-        // Upsert on composite unique constraint (kalturaId, startTime, stopTime)
+      if (derivedMedia.kalturaId !== null && data.startTime !== null && data.stopTime !== null) {
         record = await db.mediaRecord.upsert({
           where: {
             kalturaId_startTime_stopTime: {
-              kalturaId,
+              kalturaId: derivedMedia.kalturaId,
               startTime: data.startTime,
               stopTime: data.stopTime,
             },
@@ -134,7 +167,6 @@ export async function importBatch(
           create: data,
         });
       } else {
-        // Missing one of the composite key fields — always create (no dedup key)
         record = await db.mediaRecord.create({ data });
       }
 
@@ -145,7 +177,6 @@ export async function importBatch(
     }
   }
 
-  // Bulk sync to Typesense
   if (imported.length > 0) {
     await bulkUpsertToTypesense(imported);
   }
@@ -178,9 +209,7 @@ export async function exportRecordsCsv(): Promise<string> {
   });
 }
 
-// ─── Progress Tracking (Redis) ─────────────────────────────────────
-
-const PROGRESS_TTL = 3600; // 1 hour
+const PROGRESS_TTL = 3600;
 
 export async function updateImportProgress(
   jobId: string,
@@ -201,3 +230,4 @@ export async function getImportProgress(
   if (!data) return null;
   return JSON.parse(data) as ImportProgress;
 }
+

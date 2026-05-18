@@ -1070,3 +1070,14 @@ While this is a private repository, internal contributions are welcome. Please:
 
 *Last Updated: March 2026*  
 *Version: 1.0.0*
+
+## Production Hardening Runbook
+
+For the concrete rollout steps that satisfy the production checklist (secrets, HTTPS, network exposure, monitoring, backups), see:
+
+- `docs/PROD_HARDENING.md`
+- `docker-compose.prod.yml`
+- `docker/caddy/Caddyfile.prod`
+- `docker/caddy/Caddyfile.local-safe` (development-safe variant)
+- `ops/healthcheck.ps1`
+- `ops/backup.ps1`

@@ -14,6 +14,15 @@ export default async function RecordEditPage({ params }: EditPageProps) {
     notFound();
   }
 
+  console.log('SERVER DEBUG: Record data from database:', {
+    id: record.id,
+    kalturaId: record.kalturaId,
+    embedCode: record.embedCode ? `${record.embedCode.substring(0, 50)}...` : 'null/empty',
+    startTime: record.startTime,
+    stopTime: record.stopTime,
+    title: record.title
+  });
+
   // Serialize for client component (Date → string)
   const serialized = {
     id: record.id,

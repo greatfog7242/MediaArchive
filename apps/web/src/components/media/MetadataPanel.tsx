@@ -1,6 +1,7 @@
 "use client";
 
 import { useRole } from "@/hooks/use-role";
+import { formatDateOnlyUTC, formatDateTimeUTC } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 
@@ -31,11 +32,11 @@ function formatTime(seconds: number): string {
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   if (value === null || value === undefined || value === "") return null;
   return (
-    <div className="space-y-1">
+    <div className="space-y-1 break-words">
       <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </dt>
-      <dd className="text-sm">{value}</dd>
+      <dd className="text-sm break-words">{value}</dd>
     </div>
   );
 }
@@ -44,22 +45,15 @@ export function MetadataPanel({ record }: MetadataPanelProps) {
   const { canMutate } = useRole();
 
   return (
-    <div className="space-y-6">
-      {/* Basic fields — visible to all roles */}
+    <div className="space-y-6 break-words">
+      {/* Basic fields - visible to all roles */}
       <dl className="space-y-4">
         <Field label="Title" value={record.title} />
         <Field label="Series" value={record.series} />
         <Field label="Reporter" value={record.reporter} />
         <Field label="Film Reel" value={record.filmReel} />
         <Field label="Reel Segment" value={record.reelSegment} />
-        <Field
-          label="Date"
-          value={
-            record.date
-              ? new Date(record.date).toLocaleDateString()
-              : null
-          }
-        />
+        <Field label="Date" value={formatDateOnlyUTC(record.date)} />
         <Field
           label="View Online"
           value={
@@ -68,7 +62,7 @@ export function MetadataPanel({ record }: MetadataPanelProps) {
                 href={record.viewOnline}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-primary underline hover:no-underline"
+                className="text-primary underline hover:no-underline break-all"
               >
                 {record.viewOnline}
               </a>
@@ -77,11 +71,11 @@ export function MetadataPanel({ record }: MetadataPanelProps) {
         />
       </dl>
 
-      {/* Advanced fields — EDITOR+ only */}
+      {/* Advanced fields - EDITOR+ only */}
       {canMutate && (
         <>
           <Separator />
-          <div>
+          <div className="break-words">
             <Badge variant="outline" className="mb-3 text-[10px]">
               Editor Details
             </Badge>
@@ -90,28 +84,13 @@ export function MetadataPanel({ record }: MetadataPanelProps) {
               <Field label="Kaltura ID" value={record.kalturaId} />
               <Field
                 label="Start Time"
-                value={
-                  record.startTime !== null
-                    ? formatTime(record.startTime)
-                    : null
-                }
+                value={record.startTime !== null ? formatTime(record.startTime) : null}
               />
               <Field
                 label="Stop Time"
-                value={
-                  record.stopTime !== null
-                    ? formatTime(record.stopTime)
-                    : null
-                }
+                value={record.stopTime !== null ? formatTime(record.stopTime) : null}
               />
-              <Field
-                label="Last Modified"
-                value={
-                  record.updatedAt
-                    ? new Date(record.updatedAt).toLocaleString()
-                    : null
-                }
-              />
+              <Field label="Last Modified" value={formatDateTimeUTC(record.updatedAt)} />
               <Field label="Modified By" value={record.lastModifiedById} />
             </dl>
           </div>

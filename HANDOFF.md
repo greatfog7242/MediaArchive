@@ -1,11 +1,14 @@
 # MediaArchive — Session Handoff Document
 
-**Last updated:** 2026-03-02
-**Status:** Phase 6b complete — all features implemented. Database contains 22 test records for demo purposes. Fixed: removed field-level unique constraint on kalturaId, kept composite unique constraint (kalturaId+startTime+stopTime).
+**Last updated:** 2026-03-03
+**Status:** Phase 6b complete — all features implemented. Database contains 22 test records for demo purposes. 
+- Fixed: removed field-level unique constraint on kalturaId, kept composite unique constraint (kalturaId+startTime+stopTime)
+- Fixed: Back button now returns to search results with filters preserved via URL routing
+- Added: Comprehensive README.md user manual
 
 ---
 
-## Current Situation (2026-02-28)
+## Current Situation (2026-03-03)
 
 All Phase 1 through 6 work is complete. The stack is **fully running**.
 
@@ -31,7 +34,7 @@ curl http://localhost:3000/api/health   # → {"ok":true,"service":"mediaarchive
 
 ---
 
-## Recent Changes (2026-02-28)
+## Recent Changes (2026-03-03)
 
 ### CSV Import Format
 - File: `testRecords.csv` — contains 21 test records
@@ -53,14 +56,30 @@ curl http://localhost:3000/api/health   # → {"ok":true,"service":"mediaarchive
 - Fix: Removed field-level unique constraint on `kalturaId`, kept composite unique constraint on `(kalturaId, startTime, stopTime)`
 - Database now allows multiple records with same KalturaID but different start/stop times
 - CSV import uses composite key for deduplication
+
+### Search URL Routing & Back Button Fix (2026-03-03)
+- Issue: Back button returned to empty search page instead of filtered results
+- Root cause: InstantSearch state wasn't synced to URL; no parameters passed to record pages
+- Fix: Implemented URL routing for InstantSearch to preserve search state
+- **New file**: `src/lib/search-router.ts` — syncs InstantSearch state to URL
+- **How it works**:
+  1. User searches → URL updates with parameters (e.g., `/search?q=test&series=News`)
+  2. Click record → parameters passed to record page (`/record/[id]?q=test&series=News`)
+  3. Click Back → returns to `/search?q=test&series=News` with filters restored
+- **Files modified**:
+  - `src/app/(protected)/search/page.tsx` — Added `useSearchRouter()` and `initialUiState`
+  - `src/components/search/HitTile.tsx` — Updated links to pass search parameters
+  - `src/app/(protected)/record/[id]/RecordDetailClient.tsx` — Updated Back button logic
+- **Benefits**: Seamless UX, browser history works, all search parameters preserved
+
 ```bash
 curl -X DELETE "http://localhost:8108/collections/media_records?force=true" -H "X-Typesense-Api-Key: dev_typesense_admin_key"
 curl -b cookies.txt -X POST "http://localhost:3000/api/hono/sync"
 ```
 
 ### Git Status
-- Repository initialized locally
-- Not yet pushed to GitHub (gh CLI not installed)
+- Repository pushed to GitHub: `https://github.com/greatfog7242/MediaArchive.git`
+- Latest commits include schema fix, back button fix, and comprehensive README
 
 ---
 
@@ -251,7 +270,7 @@ Three workstreams: (1) Bulk Edit — backend service + API + multi-select UI wit
 | **`env.ts` crashes in browser** | `serverEnvSchema.safeParse(process.env)` ran in client bundle — DATABASE_URL etc. don't exist in browser. | Added `const isClient = typeof window !== "undefined"` guard to skip server validation in browser. |
 | **`NEXT_PUBLIC_*` vars not inlined at build time** | Two causes: (1) Dockerfile didn't pass NEXT_PUBLIC vars as build args. (2) `typesense-adapter.ts` used `clientEnv.NEXT_PUBLIC_X` (Zod result object) instead of literal `process.env.NEXT_PUBLIC_X` — Next.js only statically replaces literal dot-notation access. | (1) Added `ARG`/`ENV` in Dockerfile builder stage + `build.args` in docker-compose.yml. (2) Rewrote `typesense-adapter.ts` to use `process.env.NEXT_PUBLIC_*` directly. |
 | **Typesense port 8108 not exposed to host** | Client-side InstantSearch connects directly to Typesense from browser, but port wasn't mapped. | Added `ports: "8108:8108"` to typesense service in docker-compose.yml. |
-| **Typesense scoped search-only key returns 401** | `generateScopedSearchKey()` from `scripts/init-typesense.ts` produces a key that Typesense rejects. | **Dev workaround:** Changed `.env` to use admin key as search key. **Production TODO:** investigate proper scoped key generation. |
+| **Typesense search-only key generation** | Script used `generateScopedSearchKey()` as a long-lived browser key. | Reworked `scripts/init-typesense.ts` to create a real `documents:search` key via the Typesense Keys API (optional fixed value from `TYPESENSE_SEARCH_ONLY_KEY`). |
 
 ### Files Modified During Bug Fixes
 | File | Change |
@@ -280,12 +299,17 @@ Three workstreams: (1) Bulk Edit — backend service + API + multi-select UI wit
 | Bulk Edit dialog opens from action bar | PASS |
 | Admin page: Import CSV dialog opens | PASS |
 
-**Known Pre-existing Console Errors (not addressed):**
-- Auth session fetch error on page load (benign timing issue)
-- React hydration error #418 (text content mismatch SSR vs client)
+**Frontend Console Issues (fixed on 2026-03-24):**
+- Fixed auth session timing noise by seeding SessionProvider with server auth() data from protected layout and disabling focus/interval refetch.
+- Fixed hydration mismatch risk by replacing locale/timezone-dependent render formatting with deterministic shared formatters (en-US, UTC) in client-rendered metadata/search/admin UI.
 
+**Future Confirmation Checklist:**
+- Start app and sign in as any user.
+- Hard refresh /search, /record/[id], and /admin.
+- Confirm browser console has no session fetch warning loop and no React hydration mismatch warning (#418).
+- Run npm run typecheck in apps/web to confirm typing remains clean.
 ### Production TODOs
-- Investigate Typesense scoped search-only key generation — currently using admin key in dev `.env`
+- Verify `scripts/init-typesense.ts` has been run after key changes so `.env` search-only keys match the active Typesense key
 - In production, Typesense port 8108 should NOT be exposed to public internet — use a reverse proxy or network policy
 - Rate limit keys use `rl:{userId}:{path}` — consider adding IP-based limiting for unauthenticated endpoints
 
@@ -666,7 +690,7 @@ Then re-run migration and seed.
 | Bulk edit max 100 records per call | Prevents accidental mass updates; loops through IDs with individual Prisma updates |
 | `NEXT_PUBLIC_*` must use literal `process.env.NEXT_PUBLIC_X` | Next.js only statically replaces literal dot-notation access at build time — cannot use Zod-parsed objects or dynamic access |
 | Typesense port 8108 exposed in dev docker-compose | Browser-side InstantSearch connects directly to Typesense; production should use reverse proxy |
-| Admin key used as search-only key in dev `.env` | Scoped key from `generateScopedSearchKey()` returns 401; needs investigation for production |
+| Dedicated search-only key in dev `.env` | `scripts/init-typesense.ts` creates a proper `documents:search` key; do not reuse the admin key in browser env vars |
 
 ---
 
@@ -757,3 +781,13 @@ Login as each user (admin/editor/viewer @test.com), verify:
 - Change a user's role → verify new permissions take effect (may need to wait up to 5min for Redis cache, or role change invalidates cache immediately)
 - Delete a non-admin user → verify removed
 - Attempt to delete last admin → verify error message
+
+
+
+
+### Production Security/Deploy Hardening (2026-03-24)
+- Added `docker-compose.prod.yml` to remove direct host exposure for app/postgres/redis/typesense in production and enforce stricter runtime defaults.
+- Added `docker/caddy/Caddyfile.prod` for HTTPS termination, redirect, and security headers.
+- Added `docker/caddy/Caddyfile.local-safe` for development-safe local proxying without sticky HSTS behavior.
+- Added ops scripts: `ops/healthcheck.ps1` and `ops/backup.ps1` for monitoring/backup operations.
+- Added runbook: `docs/PROD_HARDENING.md` mapping checklist items to executable steps.

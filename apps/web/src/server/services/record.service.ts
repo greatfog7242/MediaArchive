@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import { deriveMediaMetadata } from "@/lib/kaltura";
 import { db } from "@/server/db";
 import {
   upsertToTypesense,
@@ -7,7 +8,6 @@ import {
   bulkUpsertToTypesense,
 } from "@/server/typesense.service";
 
-// Helper function to generate Kaltura embed code
 function generateKalturaEmbedCode(
   kalturaId: string,
   startTime: number = 0,
@@ -17,8 +17,6 @@ function generateKalturaEmbedCode(
   const partnerId = "2370711";
   const uiconfId = "54949472";
   const widgetId = "1_a9d2nted";
-
-  // Ensure startTime is a number (handle null/undefined)
   const safeStartTime = startTime ?? 0;
 
   let src = `https://cdnapisec.kaltura.com/p/${partnerId}/embedPlaykitJs/uiconf_id/${uiconfId}?iframeembed=true&amp;entry_id=${kalturaId}&amp;kalturaSeekFrom=${safeStartTime}`;
@@ -32,8 +30,6 @@ function generateKalturaEmbedCode(
   return `<iframe id="kaltura_player_${kalturaId}" src="${src}" style="width: 608px;height: 342px;border: 0;" allowfullscreen="" webkitallowfullscreen="" mozallowfullscreen="" allow="autoplay *; fullscreen *; encrypted-media *" sandbox="allow-downloads allow-forms allow-same-origin allow-scripts allow-top-navigation allow-pointer-lock allow-popups allow-modals allow-orientation-lock allow-popups-to-escape-sandbox allow-presentation allow-top-navigation-by-user-activation" title="${title}">
                     </iframe>`;
 }
-
-// ─── Validation Schemas ──────────────────────────────────────────
 
 export const createRecordSchema = z.object({
   title: z.string().min(1, "Title is required"),
@@ -68,8 +64,6 @@ export const paginationSchema = z.object({
 export type CreateRecordInput = z.infer<typeof createRecordSchema>;
 export type UpdateRecordInput = z.infer<typeof updateRecordSchema>;
 export type PaginationInput = z.infer<typeof paginationSchema>;
-
-// ─── Service Functions ───────────────────────────────────────────
 
 export async function listRecords(params: PaginationInput) {
   const { page, limit, series, reporter, filmReel } = params;
@@ -107,30 +101,32 @@ export async function getRecordById(id: string) {
 }
 
 export async function createRecord(input: CreateRecordInput, editorId: string) {
-  // Generate embed code if kalturaId is provided and embedCode is not
+  const derivedMedia = deriveMediaMetadata({
+    kalturaId: input.kalturaId ?? null,
+    viewOnline: null,
+    embedCode: input.embedCode ?? null,
+  });
+
   let embedCode = input.embedCode ?? null;
-  if (input.kalturaId && !input.embedCode) {
+  if (derivedMedia.kalturaId && !embedCode) {
     const startTime = input.startTime ?? 0;
     const stopTime = input.stopTime ?? null;
-
-    // Always generate embed code - the function handles invalid stop times
     embedCode = generateKalturaEmbedCode(
-      input.kalturaId,
+      derivedMedia.kalturaId,
       startTime,
       stopTime,
       input.title
     );
   }
 
-  // 1. Write to PostgreSQL (source of truth)
   const record = await db.mediaRecord.create({
     data: {
       title: input.title,
       series: input.series ?? null,
       date: input.date ? new Date(input.date) : null,
       accessCopy: input.accessCopy ?? null,
-      kalturaId: input.kalturaId ?? null,
-      embedCode: embedCode,
+      kalturaId: derivedMedia.kalturaId,
+      embedCode,
       viewOnline: input.viewOnline ?? null,
       startTime: input.startTime ?? null,
       stopTime: input.stopTime ?? null,
@@ -141,9 +137,7 @@ export async function createRecord(input: CreateRecordInput, editorId: string) {
     },
   });
 
-  // 2. Sync to Typesense (non-throwing)
   await upsertToTypesense(record);
-
   return record;
 }
 
@@ -152,41 +146,35 @@ export async function updateRecord(
   input: UpdateRecordInput,
   editorId: string
 ) {
-  // Check record exists
   const existing = await db.mediaRecord.findUnique({ where: { id } });
   if (!existing) return null;
 
-  // Determine if we need to generate/regenerate embed code
   let embedCode = input.embedCode;
+  const nextKalturaId = input.kalturaId ?? existing.kalturaId;
   const shouldGenerateEmbedCode =
-    // If kalturaId is being set/changed and embedCode wasn't explicitly provided
     (input.kalturaId !== undefined && input.embedCode === undefined) ||
-    // If startTime or stopTime is being changed and we have a kalturaId
     ((input.startTime !== undefined || input.stopTime !== undefined) &&
-     (input.kalturaId ?? existing.kalturaId) &&
-     input.embedCode === undefined);
+      nextKalturaId &&
+      input.embedCode === undefined);
 
   if (shouldGenerateEmbedCode) {
-    const kalturaId = input.kalturaId ?? existing.kalturaId;
     const startTime = input.startTime ?? existing.startTime ?? 0;
     const stopTime = input.stopTime ?? existing.stopTime ?? null;
     const title = input.title ?? existing.title;
 
-    if (kalturaId) {
-      // Always generate embed code - the function handles invalid stop times
-      embedCode = generateKalturaEmbedCode(
-        kalturaId,
-        startTime,
-        stopTime,
-        title
-      );
+    if (nextKalturaId) {
+      embedCode = generateKalturaEmbedCode(nextKalturaId, startTime, stopTime, title);
     } else {
-      // No kalturaId, clear embed code
       embedCode = null;
     }
   }
 
-  // 1. Update in PostgreSQL
+  const derivedMedia = deriveMediaMetadata({
+    kalturaId: input.kalturaId ?? existing.kalturaId,
+    viewOnline: null,
+    embedCode: embedCode ?? existing.embedCode,
+  });
+
   const record = await db.mediaRecord.update({
     where: { id },
     data: {
@@ -198,15 +186,11 @@ export async function updateRecord(
       ...(input.accessCopy !== undefined && {
         accessCopy: input.accessCopy ?? null,
       }),
-      ...(input.kalturaId !== undefined && {
-        kalturaId: input.kalturaId ?? null,
-      }),
+      kalturaId: derivedMedia.kalturaId,
       ...(embedCode !== undefined && {
         embedCode: embedCode ?? null,
       }),
-      ...(input.viewOnline !== undefined && {
-        viewOnline: input.viewOnline ?? null,
-      }),
+      viewOnline: input.viewOnline ?? null,
       ...(input.startTime !== undefined && {
         startTime: input.startTime ?? null,
       }),
@@ -226,23 +210,16 @@ export async function updateRecord(
     },
   });
 
-  // 2. Sync to Typesense
   await upsertToTypesense(record);
-
   return record;
 }
 
 export async function deleteRecord(id: string) {
-  // Check record exists
   const existing = await db.mediaRecord.findUnique({ where: { id } });
   if (!existing) return null;
 
-  // 1. Delete from PostgreSQL
   await db.mediaRecord.delete({ where: { id } });
-
-  // 2. Remove from Typesense
   await deleteFromTypesense(id);
-
   return existing;
 }
 
@@ -257,8 +234,6 @@ export async function bulkUpdateRecords(
   };
 
   const updatedRecords: Parameters<typeof bulkUpsertToTypesense>[0] = [];
-
-  // Build the Prisma data object (only non-undefined fields)
   const data: Record<string, unknown> = { lastModifiedById: editorId };
   if (updates.title !== undefined) data.title = updates.title;
   if (updates.series !== undefined) data.series = updates.series ?? null;
@@ -287,10 +262,10 @@ export async function bulkUpdateRecords(
     }
   }
 
-  // Sync all updated records to Typesense in one batch
   if (updatedRecords.length > 0) {
     await bulkUpsertToTypesense(updatedRecords);
   }
 
   return results;
 }
+

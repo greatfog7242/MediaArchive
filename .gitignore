@@ -44,3 +44,7 @@ Thumbs.db
 build-log.txt
 temp.txt
 cookies.txt
+
+# Ops artifacts
+backups/
+ops/*.log

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Database,
@@ -9,6 +10,7 @@ import {
   Download,
   Trash2,
   Plus,
+  FilePlus,
 } from "lucide-react";
 import { ImportDialog } from "@/components/admin/ImportDialog";
 import { Button } from "@/components/ui/button";
@@ -35,6 +37,7 @@ import {
   DialogTrigger,
   DialogClose,
 } from "@/components/ui/dialog";
+import { formatDateOnlyUTC, formatDateTimeUTC, formatNumberEnUS } from "@/lib/format";
 
 interface UserData {
   id: string;
@@ -70,8 +73,6 @@ export function AdminDashboardClient({ users: initialUsers, stats }: Props) {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  // ─── Dashboard Actions ──────────────────────────────────────────
-
   async function handleSync() {
     setSyncing(true);
     try {
@@ -83,8 +84,6 @@ export function AdminDashboardClient({ users: initialUsers, stats }: Props) {
       setSyncing(false);
     }
   }
-
-  // ─── User Management ────────────────────────────────────────────
 
   async function handleCreateUser() {
     setCreating(true);
@@ -149,8 +148,6 @@ export function AdminDashboardClient({ users: initialUsers, stats }: Props) {
     }
   }
 
-  // ─── Render ──────────────────────────────────────────────────────
-
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Admin Panel</h1>
@@ -161,10 +158,8 @@ export function AdminDashboardClient({ users: initialUsers, stats }: Props) {
           <TabsTrigger value="users">Users</TabsTrigger>
         </TabsList>
 
-        {/* ── Dashboard Tab ──────────────────────────────────────── */}
         <TabsContent value="dashboard">
           <div className="space-y-6">
-            {/* Stats Cards */}
             <div className="grid gap-4 sm:grid-cols-3">
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -175,7 +170,7 @@ export function AdminDashboardClient({ users: initialUsers, stats }: Props) {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">
-                    {stats.recordCount.toLocaleString()}
+                    {formatNumberEnUS(stats.recordCount)}
                   </div>
                 </CardContent>
               </Card>
@@ -202,16 +197,31 @@ export function AdminDashboardClient({ users: initialUsers, stats }: Props) {
                 <CardContent>
                   <div className="text-sm font-medium">
                     {stats.lastSyncTime
-                      ? new Date(stats.lastSyncTime).toLocaleString()
+                      ? formatDateTimeUTC(stats.lastSyncTime)
                       : "Never"}
                   </div>
                 </CardContent>
               </Card>
             </div>
 
-            {/* Actions */}
-            <div className="grid gap-4 sm:grid-cols-2">
-              {/* Re-sync */}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Add New Record</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="mb-4 text-sm text-muted-foreground">
+                    Create a new media record manually.
+                  </p>
+                  <Button asChild>
+                    <Link href="/record/new">
+                      <FilePlus className="mr-1.5 h-4 w-4" />
+                      Add New Record
+                    </Link>
+                  </Button>
+                </CardContent>
+              </Card>
+
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Typesense Re-sync</CardTitle>
@@ -230,7 +240,6 @@ export function AdminDashboardClient({ users: initialUsers, stats }: Props) {
                 </CardContent>
               </Card>
 
-              {/* CSV Import / Export */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">CSV Import / Export</CardTitle>
@@ -251,10 +260,8 @@ export function AdminDashboardClient({ users: initialUsers, stats }: Props) {
           </div>
         </TabsContent>
 
-        {/* ── Users Tab ──────────────────────────────────────────── */}
         <TabsContent value="users">
           <div className="space-y-4">
-            {/* Create User Dialog */}
             <Dialog>
               <DialogTrigger asChild>
                 <Button>
@@ -328,7 +335,6 @@ export function AdminDashboardClient({ users: initialUsers, stats }: Props) {
               </DialogContent>
             </Dialog>
 
-            {/* Users Table */}
             <Card>
               <Table>
                 <TableHeader>
@@ -344,7 +350,7 @@ export function AdminDashboardClient({ users: initialUsers, stats }: Props) {
                   {users.map((user) => (
                     <TableRow key={user.id}>
                       <TableCell className="font-medium">
-                        {user.name ?? "—"}
+                        {user.name ?? "-"}
                       </TableCell>
                       <TableCell>{user.email}</TableCell>
                       <TableCell>
@@ -361,7 +367,7 @@ export function AdminDashboardClient({ users: initialUsers, stats }: Props) {
                         </Select>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
-                        {new Date(user.createdAt).toLocaleDateString()}
+                        {formatDateOnlyUTC(user.createdAt)}
                       </TableCell>
                       <TableCell>
                         <Dialog>

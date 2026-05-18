@@ -1,14 +1,18 @@
 "use client";
 
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
 import { useSearchBox } from "react-instantsearch";
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
 export function SearchBox() {
   const { query, refine } = useSearchBox();
-  const [inputValue, setInputValue] = useState(query);
+  const [inputValue, setInputValue] = useState(query === "*" ? "" : query);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setInputValue(query === "*" ? "" : query);
+  }, [query]);
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -17,7 +21,7 @@ export function SearchBox() {
 
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => {
-        refine(value);
+        refine(value.trim() === "" ? "*" : value);
       }, 150);
     },
     [refine]

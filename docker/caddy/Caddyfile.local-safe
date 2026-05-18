@@ -1,0 +1,32 @@
+# Local-safe Caddy config for development
+# - Binds only to localhost
+# - No ACME/real cert requirements
+# - Avoids HSTS so local testing is not sticky in browsers
+#
+# Usage (example):
+# docker compose down
+# docker compose up -d
+# (This file is intended for manual mounting/swap in local dev.)
+
+http://localhost, http://127.0.0.1 {
+    encode zstd gzip
+
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        -Server
+    }
+
+    reverse_proxy app:3000
+
+    log {
+        output file /var/log/caddy/access-local.log {
+            roll_size 5MiB
+            roll_keep 5
+            roll_keep_for 168h
+        }
+        format console
+    }
+}
